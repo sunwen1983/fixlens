@@ -35,10 +35,14 @@ Anything else (multi-photo, history, tenant messaging, cost estimates)
 is explicitly OUT of scope for the demo.
 
 ## What is mock vs real in this scaffold
-- MOCK (works today, no API): `MockProvider` returns a fixed region and
-  a fixed structured diagnosis for any uploaded photo. The upload page,
-  the JSON shape, the checklist/parts/ticket rendering, and the tests
-  all run against this mock.
+- MOCK (works today, no API): `MockProvider` returns a deterministic
+  region + extended structured diagnosis for one of four scenarios
+  (water stain/leak, wall crack, mould spot, peeling paint), picked
+  by an explicit form choice or by filename/notes keywords. The
+  upload page renders safety warnings first, then diagnosis,
+  checklist, parts (quantities only, no prices), and a DRAFT ticket
+  with editable example fields. The JSON shape, the rendering, and
+  the tests all run against this mock.
 - REAL (stub only, NOT wired, NOT called): `MetaModelProvider` in
   `fixlens/providers.py` records the intended integration only:
   base_url `https://api.meta.ai/v1`, models `muse-spark-1.3`

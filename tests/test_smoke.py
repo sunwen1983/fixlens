@@ -7,17 +7,26 @@ Also asserts the Meta provider stub refuses to call anything, so no
 test path can accidentally spend credits.
 """
 
+import http.client
 import json
+import os
 import sys
 import threading
 import unittest
+import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fixlens.app import make_server
-from fixlens.providers import MetaModelProvider, MockProvider
+from fixlens.app import MAX_UPLOAD_BYTES, build_provider, make_server
+from fixlens.providers import (
+    MetaModelProvider,
+    MockProvider,
+    Region,
+    pick_scenario,
+)
 
 # Minimal 1x1 PNG (bytes only — content is irrelevant to the mock).
 FAKE_PNG = (
@@ -92,6 +101,147 @@ class SmokeTest(unittest.TestCase):
         data = analysis.to_dict()
         self.assertIn("region", data)
         self.assertIn("diagnosis", data)
+
+
+class SchemaAndScenarioTest(unittest.TestCase):
+    """Extended schema, all mock scenarios, and the mock-only guard."""
+
+    def test_all_scenarios_have_full_schema(self):
+        cases = [
+            ("leak.png", "", "", "water_leak_stain"),
+            ("wall.jpg", "", "crack", "wall_crack"),
+            ("photo.png", "mould in bathroom", "", "mould_spot"),
+            ("photo.png", "peeling paint", "", "peeling_paint"),
+        ]
+        for filename, notes, scenario, fault_type in cases:
+            with self.subTest(fault_type=fault_type):
+                data = MockProvider().analyze(
+                    b"fake-bytes", filename, notes=notes, scenario=scenario
+                ).to_dict()
+                self.assertTrue(data["region"])
+                region = data["region"]
+                self.assertTrue(0 <= region["x"] < 1 and 0 <= region["width"] <= 1)
+                diag = data["diagnosis"]
+                self.assertEqual(diag["fault_type"], fault_type)
+                self.assertIn(diag["severity"], ("low", "moderate", "urgent"))
+                self.assertTrue(diag["severity_reason"])
+                self.assertTrue(diag["safety_warnings"])
+                self.assertIn("SAFETY", diag["safety_warnings"][0])
+                self.assertTrue(diag["repair_steps"])
+                self.assertTrue(diag["parts"])
+                self.assertTrue(diag["difficulty"])
+                self.assertIn("estimate", diag["estimated_time"])
+                self.assertTrue(diag["responsibility_hint"])
+                self.assertEqual(diag["ticket"]["status"], "draft")
+                self.assertIn("DRAFT", diag["ticket_draft"])
+                # No prices anywhere in the output.
+                self.assertNotIn("$", json.dumps(data))
+
+    def test_default_scenario_is_leak(self):
+        self.assertEqual(pick_scenario("photo.png", ""), "leak")
+
+    def test_provider_interface_segment_and_diagnose(self):
+        provider = MockProvider()
+        region = provider.segment(b"fake-bytes", "crack")
+        self.assertIsInstance(region, Region)
+        self.assertTrue(region.is_valid())
+        diag = provider.diagnose(b"fake-bytes", region)
+        self.assertEqual(diag.fault_type, "wall_crack")
+
+    def test_meta_stub_segment_and_diagnose_raise(self):
+        stub = MetaModelProvider()
+        with self.assertRaises(RuntimeError):
+            stub.segment(b"fake-bytes", "leak")
+        with self.assertRaises(RuntimeError):
+            stub.diagnose(b"fake-bytes", Region(0.1, 0.1, 0.5, 0.5))
+
+    def test_mock_only_guard(self):
+        with mock.patch.dict(os.environ, {"FIXLENS_PROVIDER": "meta"}):
+            with self.assertRaises(RuntimeError):
+                build_provider()
+
+    def test_empty_photo_rejected_by_provider(self):
+        with self.assertRaises(ValueError):
+            MockProvider().analyze(b"")
+
+
+class ValidationTest(SmokeTest):
+    """HTTP validation: empty / missing / wrong-type / oversize uploads.
+
+    Reuses SmokeTest's server (setUpClass) but overrides the flow
+    tests by only adding validation cases here.
+    """
+
+    def _post_raw(self, body: bytes, content_type: str):
+        req = urllib.request.Request(
+            self._url("/api/diagnose"), data=body, method="POST",
+            headers={"Content-Type": content_type},
+        )
+        try:
+            with urllib.request.urlopen(req) as res:
+                return res.status, json.loads(res.read())
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read())
+
+    def test_empty_file_rejected(self):
+        body, boundary = _multipart("photo", "empty.png", b"")
+        status, payload = self._post_raw(
+            body, f"multipart/form-data; boundary={boundary}")
+        self.assertEqual(status, 400)
+        self.assertIn("empty", payload["error"])
+
+    def test_missing_file_rejected(self):
+        boundary = "----fixlens-test-boundary"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="notes"\r\n\r\n'
+            "hello\r\n"
+            f"--{boundary}--\r\n"
+        ).encode()
+        status, _payload = self._post_raw(
+            body, f"multipart/form-data; boundary={boundary}")
+        self.assertEqual(status, 400)
+
+    def test_wrong_content_type_rejected(self):
+        status, _payload = self._post_raw(b"{}", "application/json")
+        self.assertEqual(status, 400)
+
+    def test_oversize_rejected(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        conn.putrequest("POST", "/api/diagnose")
+        conn.putheader("Content-Type",
+                       "multipart/form-data; boundary=----fixlens-test-boundary")
+        conn.putheader("Content-Length", str(MAX_UPLOAD_BYTES + 1))
+        conn.endheaders()
+        res = conn.getresponse()
+        payload = json.loads(res.read())
+        conn.close()
+        self.assertEqual(res.status, 413)
+        self.assertIn("10 MB", payload["error"])
+
+    def test_ticket_fields_editable_but_still_draft(self):
+        boundary = "----fixlens-test-boundary"
+        body = (
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="photo"; filename="leak.png"\r\n'
+            "Content-Type: image/png\r\n\r\n"
+        ).encode() + FAKE_PNG + (
+            f"\r\n--{boundary}\r\n"
+            'Content-Disposition: form-data; name="property"\r\n\r\n'
+            "Example Property, Unit B\r\n"
+            f"--{boundary}\r\n"
+            'Content-Disposition: form-data; name="tenant"\r\n\r\n'
+            "Example Tenant B\r\n"
+            f"--{boundary}--\r\n"
+        ).encode()
+        status, payload = self._post_raw(
+            body, f"multipart/form-data; boundary={boundary}")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["diagnosis"]["ticket"]["property"],
+                         "Example Property, Unit B")
+        self.assertEqual(payload["diagnosis"]["ticket"]["tenant"],
+                         "Example Tenant B")
+        self.assertEqual(payload["diagnosis"]["ticket"]["status"], "draft")
 
 
 if __name__ == "__main__":
