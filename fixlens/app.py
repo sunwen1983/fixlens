@@ -97,7 +97,9 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     '<p><b>' + esc(t.title) + '</b> · ' + esc(t.property) + '</p>' +
     '<p>' + esc(t.description) + '</p>' +
     '<p>Next steps: ' + esc(t.next_steps.join('; ')) + '</p>' +
-    '<p>Tenant: ' + esc(t.tenant) + ' · Landlord: ' + esc(t.landlord) + '</p></div>';
+    '<p>Tenant: ' + esc(t.tenant) + ' · Landlord: ' + esc(t.landlord) + '</p>' +
+    '<p id="ticket-text">' + esc(diag.ticket_draft) + '</p>' +
+    '<button onclick="navigator.clipboard.writeText(document.getElementById(\'ticket-text\').textContent)">Copy ticket</button></div>';
 });
 </script>
 </body></html>

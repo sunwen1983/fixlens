@@ -72,6 +72,8 @@ class SmokeTest(unittest.TestCase):
             page = res.read().decode()
         self.assertIn("FixLens", page)
         self.assertIn("photo", page)
+        self.assertIn("Copy ticket", page)
+        self.assertIn("ticket-text", page)
 
     def test_upload_to_mock_diagnosis(self):
         body, boundary = _multipart("photo", "leak.png", FAKE_PNG)

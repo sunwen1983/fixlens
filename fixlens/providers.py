@@ -672,25 +672,44 @@ class MetaModelProvider(Provider):
                 time.sleep(0.5 * (2 ** attempt))
         raise RuntimeError(f"Meta Model API call failed: {last_error}")
 
+    def _sam_region(self, image_bytes: bytes, concept: str) -> Region:
+        """SAM box for a concept, with one broader-concept retry.
+
+        If the specific concept (e.g. "water stain") matches nothing,
+        retry once with "damage" before giving up: a live demo should
+        not die on the first photo. If both match nothing, the
+        friendly zero-match error surfaces (never a bare 400).
+        """
+        attempts = [concept] + ([] if concept == "damage" else ["damage"])
+        for attempt in attempts:
+            payload = {
+                "model": self.SEGMENTATION_MODEL,
+                "input": [{
+                    "type": "message", "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": attempt},
+                        {"type": "input_image",
+                         "image_url": _data_url(image_bytes)},
+                    ],
+                }],
+            }
+            text = _extract_output_text(self._call(payload))
+            try:
+                records = parse_sam_output_text(text)
+            except ValueError:
+                continue
+            record = _largest_sam_record(records)
+            return _sam_record_to_region(record, f"{attempt} (SAM region)")
+        raise ValueError(
+            "No obvious fault found in this photo — please try a "
+            "clearer, closer photo of the fault.")
+
     def segment(self, image_bytes: bytes, prompt: str = "") -> Region:
         if not image_bytes:
             raise ValueError("photo bytes are empty")
         self._require_key()
         concept = concept_for(notes=prompt)
-        payload = {
-            "model": self.SEGMENTATION_MODEL,
-            "input": [{
-                "type": "message", "role": "user",
-                "content": [
-                    {"type": "input_text", "text": concept},
-                    {"type": "input_image",
-                     "image_url": _data_url(image_bytes)},
-                ],
-            }],
-        }
-        text = _extract_output_text(self._call(payload))
-        record = _largest_sam_record(parse_sam_output_text(text))
-        return _sam_record_to_region(record, f"{concept} (SAM region)")
+        return self._sam_region(image_bytes, concept)
 
     def diagnose(self, image_bytes: bytes, region: Region,
                  notes: str = "") -> Diagnosis:
@@ -765,20 +784,7 @@ class MetaModelProvider(Provider):
         # Concept must come from scenario/filename/notes, not from
         # segment()'s prompt-only mapping, so pass it explicitly.
         concept = concept_for(filename, notes, scenario)
-        payload = {
-            "model": self.SEGMENTATION_MODEL,
-            "input": [{
-                "type": "message", "role": "user",
-                "content": [
-                    {"type": "input_text", "text": concept},
-                    {"type": "input_image",
-                     "image_url": _data_url(photo_bytes)},
-                ],
-            }],
-        }
-        text = _extract_output_text(self._call(payload))
-        record = _largest_sam_record(parse_sam_output_text(text))
-        region = _sam_record_to_region(record, f"{concept} (SAM region)")
+        region = self._sam_region(photo_bytes, concept)
         return Analysis(region=region,
                         diagnosis=self.diagnose(photo_bytes, region, notes))
 

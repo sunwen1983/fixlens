@@ -130,6 +130,22 @@ class MetaProviderCannedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             provider.segment(b"fake-bytes", "leak")
 
+    def test_sam_zero_match_retries_broader_concept(self):
+        calls = []
+
+        def request_fn(payload):
+            text = payload["input"][0]["content"][0]["text"]
+            calls.append(text)
+            if text == "water stain":
+                return _sam_response(text="")
+            return _sam_response()
+        provider = MetaModelProvider(api_key="test-key",
+                                     request_fn=request_fn)
+        region = provider.segment(b"fake-bytes", "leak")
+        self.assertEqual(calls, ["water stain", "damage"])
+        self.assertTrue(region.is_valid())
+        self.assertIn("damage", region.label)
+
     def test_invalid_severity_rejected(self):
         bad = dict(SPARK_DIAGNOSIS, severity="critical")
 

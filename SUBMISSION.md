@@ -33,32 +33,30 @@ workflow (segment → triage → checklist → parts → ticket), not just
 | Mock fault scenarios (≥3) | ✅ done | Leak stain, wall crack, mould spot, + peeling paint; deterministic, keyword/explicit selection. |
 | Demo storyboard + judge pitch | ✅ done (updated Oct 26) | See DEMO.md (3-minute video, shot by shot, per official guide). |
 | Judge-facing README | ✅ done | Problem/solution/Meta tools (honestly mock-labelled)/run instructions. |
-| Public repo | ✅ done (by parent, not this task) | https://github.com/sunwen1983/fixlens — do NOT push again from this task. |
-| Real SAM 3.1 + Muse Spark calls | ⏳ pending | Blocked on credits: implement behind the existing provider interface once Wen confirms credits on Billing + card + Spend Limit. |
+| Public repo | ✅ done | https://github.com/sunwen1983/fixlens — pushes by Mila on Wen's go-ahead (most recently Oct 27, commit 8b66379). |
+| Real SAM 3.1 + Muse Spark calls | ✅ wired Oct 26, live verification pending | Provider implemented + canned-response tests green; Mac live test with a real photo is the remaining step. |
 | Real fault photos (2–3) | ⏳ pending | Needs Wen's photos; mock demo photo is placeholder only. |
 | Ticket wording approval | ⏳ pending | Example property/tenant/landlord placeholders; needs Wen's approval before any ticket text is final. |
-| Demo video (3 min, real flow) | ⏳ pending | Record after real API wiring + real photos, following DEMO.md. A mock-only video risks Stage One failure. |
+| Demo video (3 min, real flow) | ⏳ pending | Record after live verification + real photos, following DEMO.md. A mock-only video risks Stage One failure. |
 | Hackathon portal submission | ⏳ pending | Via CV platform by Nov 4, 9:00 PM ET; repo public, video accessible, contributors listed. Never auto-submitted from this repo. |
 | Official rules verified | ✅ done Oct 26 | Participant Guide (logged-in page, pasted by Wen): see header above. Pre-work rule: demo must only highlight work built during the Hackathon — FixLens code qualifies (built Oct 26 onward). |
 | Submission format | ✅ done Oct 26 | 3-minute video + public repo + submission page fields, per guide. |
 | Judging criteria / scoring weights | ✅ done Oct 26 | Stage One pass/fail; Stage Two Impact 30 / Meta tooling 25 / Demo 25 / Tech depth 20. |
 
-## Remaining work once credits arrive (~Oct 28, 2 business days)
+## Remaining work
 
-1. Wen confirms: $150 credits visible on Billing, payment method on
-   file, Spend Limit notification set.
-2. Wire `MetaModelProvider.segment()` + `.diagnose()`; keep the exact
-   JSON shape the mock returns; remove the mock-only server guard
-   deliberately; re-run all tests.
-3. Replace mock photos with Wen's real fault photos; re-run the demo.
-4. Wen approves ticket wording; record the 3-minute demo video.
-5. Submit via the CV platform before Nov 4, 9:00 PM ET (official
+1. Mac live test: run a real fault photo through meta mode and
+   confirm the SAM box + Spark diagnosis; fix any retry/parsing
+   issue from the raw error.
+2. Wen's real fault photos (at least one leak stain, one crack);
+   re-run the demo with them.
+3. Wen approves ticket wording; record the 3-minute demo video.
+4. Submit via the CV platform before Nov 4, 9:00 PM ET (official
    rules + format already verified Oct 26).
 
-## Must NOT be done yet (from this task)
+## Must NOT be done yet
 
-- No submission to the hackathon portal.
-- No push to GitHub (parent reviews and pushes).
-- No paid API calls, no API key creation/storage.
-- No contact with anyone, no public post beyond the existing repo.
+- No submission to the hackathon portal until live verification +
+  demo video are ready and Wen confirms the submission.
 - No real tenant/landlord names or addresses in code or docs.
+- No contact with anyone, no public post beyond the existing repo.

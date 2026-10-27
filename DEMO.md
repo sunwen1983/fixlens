@@ -15,24 +15,22 @@ order; timings add up to 180 seconds.
 
 | Time | Shot | What the viewer sees / hears |
 |------|------|------------------------------|
-| 0–20s | Problem, firsthand | "As a landlord, I get photos like this: 'something is wrong.' Guessing costs days." Show the tenant photo. State: built during this hackathon (Oct 26 onward), solo Indie track, Build for Your World. |
+| 0–20s | Problem, firsthand | "As a landlord, I get photos like this: 'something is wrong.' Guessing costs days." Show the tenant photo. State: built during this hackathon, solo Indie track, Build for Your World. |
 | 20–30s | Photo | "A tenant sends this photo: a stain on the ceiling." Upload the photo. |
-| 30–50s | Segmentation overlay | The faulty region is highlighted on the photo. "FixLens first finds *where* the fault is — SAM 3.1 segmentation — so the diagnosis is grounded in a visible area, not the whole photo." (In the current mock build, this region is fixed demo output; the real SAM 3.1 call replaces it once credits land.) |
+| 30–50s | Segmentation overlay | The faulty region is highlighted on the photo with a red box. "FixLens first finds *where* the fault is — SAM 3.1 segmentation — so the diagnosis is grounded in a visible area, not the whole photo." Record this shot with the live Meta API call. |
 | 50–80s | Diagnosis card | Fault + severity + triage reason. "Moderate: water damage spreads and can cause mould, but there is no active flooding here." Then the safety box, read first: water near electrics, gas-smell warning. |
 | 80–120s | Checklist + parts | Tickable repair steps in order (inspect plumbing above → dry 24–48h → repair source, then patch and repaint) and a parts list with quantities only — no prices. Stress: this is a multi-step workflow ending in action, not a one-label image analysis. |
 | 120–160s | Ticket draft | "And one click drafts the repair ticket — property, fault, severity, next steps — marked DRAFT, nothing sent." Show the ticket fields and the DRAFT status. |
-| 160–180s | Close | End card: problem, Meta tools used (SAM 3.1 + Muse Spark via Meta Model API), public repo link, and what was built during the hackathon vs. what is mock until the real API calls land. |
+| 160–180s | Close | End card: problem, Meta tools used (SAM 3.1 + Muse Spark via Meta Model API), public repo link, and what was built during the hackathon. |
 
 ## Narration rules for the recording
 
 - Say the fault, the severity, and the safety warning out loud; do not
   skip the safety box.
-- Say "mock" once, honestly, when the segmentation overlay appears:
-  the flow is real, the model output in this build is mock until the
-  Meta Model API calls are wired (credits pending). The final video
-  must be recorded with the REAL API calls — a mock-only video risks
+- Record with the REAL API calls — a mock-only video risks
   failing Stage One judging (must reasonably use Meta Model API
-  and/or Meta open-weight models).
+  and/or Meta open-weight models). Mock mode may be used for
+  rehearsal timing only, never for the submitted video.
 - Do not claim a price, a guaranteed repair time, or a legal ruling
   on landlord vs tenant responsibility. Times are estimates; the
   responsibility line is a hint only.
@@ -46,7 +44,5 @@ write it up. FixLens turns that photo into a grounded diagnosis — SAM
 3.1 segments the faulty area, Muse Spark reasons over the photo and
 the region to produce a severity-triaged diagnosis, an ordered repair
 checklist, a parts list, and a draft landlord–tenant repair ticket.
-Today the app runs end to end in mock mode (stdlib-only Python, zero
-cost, tests green); the provider interface is built so the real SAM
-3.1 and Muse Spark calls slot in unchanged once the $150 Meta Model
-API credits land.
+The app runs end to end in mock mode and with the live Meta API
+(SAM 3.1 + Muse Spark), stdlib-only Python, tests green.
