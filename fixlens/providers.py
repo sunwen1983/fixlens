@@ -175,7 +175,7 @@ def _ticket(title: str, fault: str, severity: str, description: str,
 # Deterministic mock scenarios. Keyword matching is deliberate: the
 # demo can show three-plus distinct faults without any network call.
 # The default scenario (no keyword matched) is the leak stain, which
-# is also the 60-second demo's fault.
+# is also the demo's fault.
 _SCENARIOS: dict[str, dict] = {
     "leak": {
         "region": Region(0.25, 0.30, 0.50, 0.40, "water stain (mock region)"),
@@ -473,6 +473,11 @@ def _data_url(image_bytes: bytes) -> str:
         image_bytes).decode("ascii")
 
 
+def photo_data_url(image_bytes: bytes) -> str:
+    """Public data URL for the uploaded photo (used for the box overlay)."""
+    return _data_url(image_bytes)
+
+
 # SAM output_text grammar (official docs): one line per frame,
 # each record = object id + box + mask, box first. Mask payload is
 # base85 and may contain "~"/"!" inside, so only the first char after
@@ -509,8 +514,20 @@ def parse_sam_output_text(text: str) -> list[dict]:
             })
     if not records:
         raise ValueError(
-            "SAM returned no matching object for this photo/concept")
+            "No obvious fault found in this photo — please try a "
+            "clearer, closer photo of the fault.")
     return records
+
+
+def _largest_sam_record(records: list[dict]) -> dict:
+    """Pick the largest-area SAM box.
+
+    A photo can hold several stains/cracks; the first record is
+    arbitrary order, the largest area is the fault the user most
+    likely photographed.
+    """
+    return max(records, key=lambda r: (r["x2"] - r["x1"] + 1)
+               * (r["y2"] - r["y1"] + 1))
 
 
 def _sam_record_to_region(record: dict, label: str) -> Region:
@@ -672,7 +689,7 @@ class MetaModelProvider(Provider):
             }],
         }
         text = _extract_output_text(self._call(payload))
-        record = parse_sam_output_text(text)[0]
+        record = _largest_sam_record(parse_sam_output_text(text))
         return _sam_record_to_region(record, f"{concept} (SAM region)")
 
     def diagnose(self, image_bytes: bytes, region: Region,
@@ -760,7 +777,7 @@ class MetaModelProvider(Provider):
             }],
         }
         text = _extract_output_text(self._call(payload))
-        record = parse_sam_output_text(text)[0]
+        record = _largest_sam_record(parse_sam_output_text(text))
         region = _sam_record_to_region(record, f"{concept} (SAM region)")
         return Analysis(region=region,
                         diagnosis=self.diagnose(photo_bytes, region, notes))

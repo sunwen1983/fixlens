@@ -2,9 +2,10 @@
 
 Meta Global AI Developer Hackathon, Indie solo track, theme: Build for Your World.
 Entrant: Wen Sun (landlord; this is a problem he knows firsthand).
-Build period: Oct 26 – Nov 4, 2026. Submission due Nov 4, 9:00 PM ET.
-Status of this scaffold: MOCK-ONLY. No paid API has been called, no key is
-stored anywhere, and nothing has been submitted or published.
+Built during the hackathon. Submission due Nov 4, 9:00 PM ET.
+Status: Meta provider WIRED (credits landed Oct 26, 2026; key from
+env only). Live verification with a real photo is still pending;
+nothing has been submitted yet.
 
 ## The problem (one sentence)
 A tenant sends a blurry photo of "something wrong" and the landlord has to
@@ -26,7 +27,7 @@ list, and a landlord–tenant repair ticket.
 5. Ticket — the app drafts a landlord–tenant repair ticket (what, where,
    how urgent, what happens next) ready to send.
 
-## Scope for a 60-second demo
+## Scope for the demo video
 Show exactly one fault, end to end, in this order:
 photo upload (5s) → highlighted faulty region (10s) → diagnosis card:
 fault + severity (15s) → repair checklist + parts list (15s) →
@@ -34,40 +35,38 @@ generated ticket draft (15s). One fault, one photo, no extra features.
 Anything else (multi-photo, history, tenant messaging, cost estimates)
 is explicitly OUT of scope for the demo.
 
-## What is mock vs real in this scaffold
+## What is mock vs real in this build
 - MOCK (works today, no API): `MockProvider` returns a deterministic
   region + extended structured diagnosis for one of four scenarios
   (water stain/leak, wall crack, mould spot, peeling paint), picked
   by an explicit form choice or by filename/notes keywords. The
-  upload page renders safety warnings first, then diagnosis,
-  checklist, parts (quantities only, no prices), and a DRAFT ticket
-  with editable example fields. The JSON shape, the rendering, and
-  the tests all run against this mock.
-- REAL (stub only, NOT wired, NOT called): `MetaModelProvider` in
-  `fixlens/providers.py` records the intended integration only:
-  base_url `https://api.meta.ai/v1`, models `muse-spark-1.3`
-  (diagnosis) and `sam-3.1` (segmentation). It holds no key, reads no
-  key from disk, and raises instead of calling anything. Tests assert
-  that it raises. Do not wire it until credits arrive AND Wen confirms.
+  upload page renders the photo with a red-box overlay, safety
+  warnings first, then diagnosis, checklist, parts (quantities only,
+  no prices), and a DRAFT ticket with editable example fields. The
+  JSON shape, the rendering, and the tests all run against this mock.
+- REAL (wired Oct 26, 2026, after credits landed): `MetaModelProvider`
+  in `fixlens/providers.py` calls the Meta Model API: base_url
+  `https://api.meta.ai/v1`, models `muse-spark-1.3` (diagnosis) and
+  `sam-3.1` (segmentation, largest-area box). It holds no key and
+  reads it only from the `MODEL_API_KEY` environment variable. Live
+  verification with a real photo is still pending; canned-response
+  tests cover parsing, structured output, and retries.
 
-## Remaining steps once credits arrive (~Oct 28, 2 business days)
-1. Wen confirms on his own account: $150 credits visible on the Billing
-   page, a payment method on file, and a Spend Limit notification set.
-2. Swap the provider: implement SAM 3.1 segmentation (image + text prompt
-   → mask/box) and Muse Spark structured diagnosis (photo + region →
-   fault/severity/steps/parts/ticket fields) behind the provider
-   interface, keeping the exact JSON shape the mock already returns.
-3. Replace the mock demo photo with Wen's real sample fault photos
+## Remaining steps
+1. Mac live test: run a real fault photo through meta mode
+   (`FIXLENS_PROVIDER=meta`, key in env only) and confirm the SAM
+   box and Spark diagnosis come back; fix any retry/parsing issue
+   from the raw error.
+2. Replace the mock demo photo with Wen's real sample fault photos
    (at least one leak stain and one crack) and re-run the demo.
-4. Wen approves the ticket wording (landlord/tenant names, address,
+3. Wen approves the ticket wording (landlord/tenant names, address,
    urgency language) before any ticket text is shown as final.
-5. Record a real 60-second demo video following the script above.
-6. Submit via the hackathon portal before Nov 4, 9:00 PM ET — that
+4. Record a real 3-minute demo video following the script in DEMO.md.
+5. Submit via the hackathon portal before Nov 4, 9:00 PM ET — that
    submission step is Wen's/Mila's later decision, not part of this
-   scaffold.
+   build.
 
 ## What Wen still needs to supply
+- Mac live-test result (pass, or the raw error).
 - 2–3 real sample fault photos (leak stain, crack, etc.).
 - Ticket wording approval (names, property address, how urgency is phrased).
-- Confirmation that credits have landed (Billing page) before any real
-  API call is made.

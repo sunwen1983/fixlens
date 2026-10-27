@@ -66,6 +66,19 @@ class SamParsingTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_sam_output_text("")
 
+    def test_zero_match_message_is_friendly(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_sam_output_text("")
+        self.assertIn("clearer, closer photo", str(ctx.exception))
+        self.assertNotIn("400", str(ctx.exception))
+
+    def test_largest_sam_box_wins(self):
+        from fixlens.providers import _largest_sam_record
+        small = {"x1": 0, "y1": 0, "x2": 9, "y2": 9}
+        big = {"x1": 0, "y1": 0, "x2": 99, "y2": 99}
+        self.assertIs(_largest_sam_record([small, big]), big)
+        self.assertIs(_largest_sam_record([big, small]), big)
+
     def test_concept_is_single_noun_phrase(self):
         self.assertEqual(concept_for("photo.png", "", "crack"), "wall crack")
         self.assertEqual(concept_for("leak.png", ""), "water stain")

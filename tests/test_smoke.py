@@ -83,6 +83,7 @@ class SmokeTest(unittest.TestCase):
             payload = json.loads(res.read())
         self.assertEqual(payload["provider"], "mock")
         self.assertEqual(payload["filename"], "leak.png")
+        self.assertTrue(payload["photo_data_url"].startswith("data:image/"))
         region = payload["region"]
         self.assertTrue(0 <= region["x"] < 1 and 0 <= region["width"] <= 1)
         diag = payload["diagnosis"]

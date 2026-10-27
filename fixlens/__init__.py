@@ -1,1 +1,1 @@
-"""FixLens scaffold — mock-only hackathon build."""
+"""FixLens — home-fault photo diagnosis, Meta Model API hackathon build."""

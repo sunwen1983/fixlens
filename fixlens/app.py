@@ -28,7 +28,7 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .providers import get_provider, with_ticket_overrides
+from .providers import get_provider, photo_data_url, with_ticket_overrides
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -77,6 +77,11 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   const warn = diag.safety_warnings.map(w => '<li>' + esc(w) + '</li>').join('');
   const steps = diag.repair_steps.map(s => '<li><input type="checkbox"> ' + esc(s) + '</li>').join('');
   const parts = diag.parts.map(p => '<tr><td>' + esc(p.item) + '</td><td>' + esc(p.quantity) + '</td><td>' + esc(p.note) + '</td></tr>').join('');
+  const r = d.region;
+  const photo = '<div style="position:relative;display:inline-block;max-width:100%">' +
+    '<img src="' + esc(d.photo_data_url) + '" style="max-width:100%;display:block">' +
+    '<div style="position:absolute;left:' + (r.x * 100) + '%;top:' + (r.y * 100) + '%;width:' + (r.width * 100) + '%;height:' + (r.height * 100) + '%;border:3px solid #e53935;box-sizing:border-box">' +
+    '<span style="background:#e53935;color:#fff;padding:0 .3em;font-size:.85em">' + esc(r.label) + '</span></div></div>';
   out.innerHTML =
     '<div class="warn"><h2>⚠ Safety first</h2><ul>' + warn + '</ul></div>' +
     '<div class="card"><h2>' + esc(diag.fault) + '</h2>' +
@@ -84,7 +89,8 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     '<p>Likely cause: ' + esc(diag.likely_cause) + '</p>' +
     '<p>Difficulty: ' + esc(diag.difficulty) + ' · Estimated time: ' + esc(diag.estimated_time) + '</p>' +
     '<p>' + esc(diag.responsibility_hint) + '</p>' +
-    '<p>Segmented region: ' + esc(d.region.label) + '</p></div>' +
+    '<p>Segmented region: ' + esc(d.region.label) + '</p>' +
+    photo + '</div>' +
     '<div class="card"><h2>Repair checklist</h2><ul>' + steps + '</ul>' +
     '<h2>Parts list (quantities only — no prices)</h2><table><tr><th>Item</th><th>Quantity</th><th>Note</th></tr>' + parts + '</table></div>' +
     '<div class="card draft"><h2>Repair ticket <span class="badge">DRAFT — not sent</span></h2>' +
@@ -235,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
             "provider": self.provider_name,
             "filename": html.escape(filename),
             "size_bytes": len(photo_bytes),
+            "photo_data_url": photo_data_url(photo_bytes),
             **analysis.to_dict(),
         })
 

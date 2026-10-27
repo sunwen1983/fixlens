@@ -1,6 +1,6 @@
 # FixLens — photograph a home fault, get a diagnosis and a repair ticket
 
-**60-second version for judges.** A tenant sends a blurry photo of
+**Judge version.** A tenant sends a blurry photo of
 "something wrong." FixLens finds *where* the fault is, says *what* it
 is and *how urgent* it is, and drafts what to do next: an ordered
 repair checklist, a parts list (quantities only, no prices), and a
@@ -27,28 +27,42 @@ I write it up? FixLens turns that one photo into an answer.
 
 Four deterministic mock faults are built in: water stain / leak, wall
 crack, mould spot, and peeling paint — pick one in the upload form
-or let the filename/notes pick it.
+or let the filename/notes pick it. In meta mode the region comes
+from SAM 3.1 instead, and the upload page now renders the photo
+itself with the region drawn on it as a red box — the segmentation
+is visible, not just a line of text.
 
 ## Meta tools used — honestly labelled
 
-- **SAM 3.1** (segmentation) and **Muse Spark 1.3** (diagnosis) are
-  the intended Meta Model API models (`https://api.meta.ai/v1`).
-- **Today they are NOT live calls.** This build runs in mock mode:
+- **SAM 3.1** (segmentation) and **Muse Spark 1.3** (diagnosis) run
+  through the Meta Model API (`https://api.meta.ai/v1`).
+- **The Meta provider is wired, not a stub.** Credits ($150) landed
+  Oct 26, 2026; `MetaModelProvider` implements SAM (single short noun
+  phrase per request, pixel box converted to fractional coordinates,
+  largest-area box wins) and Spark (structured output via
+  `text.format`, severity validated, ticket always draft, parts
+  quantities only). The key comes only from the `MODEL_API_KEY`
+  environment variable — never from code or git history — and the
+  server refuses to start in meta mode without it.
+- **Live verification is still pending.** The wired provider is
+  tested with canned responses (31 tests), but no real fault photo
+  has been run through the live API yet; that Mac live test is the
+  remaining step before the demo video is recorded.
+- Mock mode is still available (`FIXLENS_PROVIDER` unset = mock):
   the provider interface (`segment` → region, `diagnose` → structured
-  JSON) is real and tested, but the model outputs are fixed demo
-  data. No paid API has been called, no key is stored anywhere, and
-  the Meta provider stub raises instead of calling — tests assert
-  that. The real calls slot into the same interface once the $150
-  Meta Model API credits land and Wen confirms.
+  JSON) is shared, but mock outputs are fixed demo data. No key is
+  stored anywhere in either mode.
 - Why Meta tools matter here: SAM grounds the diagnosis in a visible
   region instead of the whole photo, and Muse Spark turns that region
   plus the photo into structured, triaged reasoning — not free text.
 
-## Run it locally (60 seconds)
+## Run it locally
 
 ```bash
 cd fixlens
 python3 run.py            # http://127.0.0.1:8000/ — upload any photo
+FIXLENS_PROVIDER=meta MODEL_API_KEY=<your key> python3 run.py
+                          # same page, live SAM + Muse Spark (key in env only)
 python3 -m unittest discover -s tests -v   # full test suite
 ```
 
@@ -60,32 +74,39 @@ Endpoints: `GET /` (upload page), `GET /health`,
 ## Project structure
 
 - `PLAN.md` — one-page plan, demo scope, mock-vs-real, remaining steps.
-- `DEMO.md` — 60-second demo storyboard + one-paragraph judge pitch.
+- `DEMO.md` — 3-minute demo storyboard + one-paragraph judge pitch.
 - `SUBMISSION.md` — submission checklist for Nov 4, 9:00 PM ET.
 - `fixlens/providers.py` — provider interface, `MockProvider`
-  (4 deterministic scenarios), `MetaModelProvider` (stub, raises).
-- `fixlens/app.py` — stdlib HTTP server, upload page with rendered
-  safety-first result, validation (empty/missing/oversize uploads).
-- `run.py` — local entry point (mock only; refuses other providers).
+  (4 deterministic scenarios), `MetaModelProvider` (wired: SAM 3.1 +
+  Muse Spark via the Meta Model API, key from env only).
+- `fixlens/app.py` — stdlib HTTP server, upload page with the photo
+  + red-box region overlay and safety-first result, validation
+  (empty/missing/oversize uploads).
+- `run.py` — local entry point (mock by default; meta mode requires
+  `FIXLENS_PROVIDER=meta` + `MODEL_API_KEY`, otherwise refuses to start).
 - `tests/test_smoke.py` — HTTP smoke tests: schema fields, all mock
-  scenarios, validation errors, mock-only guard, stub refusal.
+  scenarios, validation errors, photo data URL for the overlay.
+- `tests/test_meta_provider.py` — canned-response tests: SAM parsing
+  (largest box wins, friendly zero-match message), Spark
+  `text.format`, 404 retry / no retry on 400.
 
-## How to swap mock → Meta API later (after credits land, Wen confirms)
+## Meta mode today (wired Oct 26, 2026, after credits landed)
 
-1. Wen confirms on dev.meta.ai: $150 credits visible on Billing, a
-   payment method on file, Spend Limit notification set.
-2. Implement `MetaModelProvider.segment()` (SAM 3.1: image + prompt →
-   region) and `.diagnose()` (Muse Spark: photo + region → the exact
-   JSON shape the mock already returns).
-3. Remove the server's mock-only guard deliberately (it refuses any
-   other provider today by design).
-4. Re-run the test suite, then re-run the demo with real fault photos.
+1. Credits confirmed on dev.meta.ai: $150 visible on Billing, a
+   payment method on file, Spend Limit notification set — done by
+   Wen on his own account.
+2. `MetaModelProvider.segment()` (SAM 3.1: image + short concept →
+   largest-area region) and `.diagnose()` (Muse Spark: photo + region
+   → the exact JSON shape the mock already returns) are implemented
+   and tested with canned responses.
+3. Live verification (not yet done): run a real fault photo through
+   meta mode and confirm the box and diagnosis come back, before
+   recording the demo video.
 
 ## Still needed before the demo is real
 
+- Mac live-test result for meta mode (real photo, real API).
 - 2–3 real sample fault photos (leak stain, crack, etc.).
 - Ticket wording approval (example names/address are placeholders).
-- Confirmation that credits have landed, before any real API call.
 - Official hackathon rules / submission format — see SUBMISSION.md
-  (marked TBD until the official rules are verified; nothing here
-  claims an official scoring rule).
+  (verified against the official participant guide Oct 26, 2026).
