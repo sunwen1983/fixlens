@@ -1,13 +1,11 @@
 """Provider layer for FixLens.
 
 Design rule: the app never talks to a model directly. It talks to a
-provider, and providers are swappable. Today only the mock provider is
-usable. The Meta Model API provider is a clearly-marked stub: it holds
-no key, reads no key, and raises instead of calling anything, because
-credits are still pending and no key has been configured.
-
-Do NOT add a real API key to this file, to any file in this repo, or to
-git history. Keys belong in the Meta account (dev.meta.ai), never here.
+provider, and providers are swappable. The mock provider is for local
+demo; the Meta Model API provider (SAM 3.1 + Muse Spark) is wired
+since credits landed Oct 26, 2026, and reads its key only from the
+MODEL_API_KEY environment variable — never from this file or git
+history. Keys belong in the Meta account (dev.meta.ai), never here.
 
 Provider interface (what the real integration must implement later):
   segment(image_bytes, prompt) -> Region
@@ -25,6 +23,12 @@ hints only — never a legal determination.
 
 from __future__ import annotations
 
+import json
+import os
+import re
+import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field, replace
 
 SEVERITIES = ("low", "moderate", "urgent")
@@ -450,44 +454,316 @@ class MockProvider(Provider):
         return Analysis(region=data["region"], diagnosis=diagnosis)
 
 
+def _media_type(image_bytes: bytes) -> str:
+    if image_bytes.startswith(b"\x89PNG"):
+        return "image/png"
+    if image_bytes.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if image_bytes.startswith(b"GIF8"):
+        return "image/gif"
+    if image_bytes.startswith(b"RIFF") and b"WEBP" in image_bytes[:12]:
+        return "image/webp"
+    return "image/jpeg"
+
+
+def _data_url(image_bytes: bytes) -> str:
+    import base64
+
+    return f"data:{_media_type(image_bytes)};base64," + base64.b64encode(
+        image_bytes).decode("ascii")
+
+
+# SAM output_text grammar (official docs): one line per frame,
+# each record = object id + box + mask, box first. Mask payload is
+# base85 and may contain "~"/"!" inside, so only the first char after
+# "H,W," is the encoding marker.
+_SAM_RECORD_RE = re.compile(
+    r"(\d+)<\|box;x1=(\d+);y1=(\d+);x2=(\d+);y2=(\d+);w=(\d+);h=(\d+)"
+    r"(?:;c=[\d.]+)?\|>"
+    r"<\|mask;x=0;y=0(?:;c=[\d.]+)?;data=(\d+),(\d+),([~!])([^|]*)\|>"
+)
+
+
+def parse_sam_output_text(text: str) -> list[dict]:
+    """Parse SAM output_text into box+mask records.
+
+    Returns one dict per record: object_id, frame (from the <Nf>
+    marker preceding it), pixel box, and raw mask payload. Raises
+    ValueError when SAM completed with zero matches.
+    """
+    records: list[dict] = []
+    frame = 0
+    # Split on frame markers, keeping each frame's records together.
+    for chunk in re.split(r"<(\d+)f>", text or ""):
+        if chunk.isdigit():
+            frame = int(chunk)
+            continue
+        for match in _SAM_RECORD_RE.finditer(chunk):
+            (obj, x1, y1, x2, y2, w, h, mh, mw, enc, payload) = match.groups()
+            records.append({
+                "object_id": int(obj), "frame": frame,
+                "x1": int(x1), "y1": int(y1), "x2": int(x2), "y2": int(y2),
+                "w": int(w), "h": int(h),
+                "mask_height": int(mh), "mask_width": int(mw),
+                "mask_encoding": enc, "mask_payload": payload,
+            })
+    if not records:
+        raise ValueError(
+            "SAM returned no matching object for this photo/concept")
+    return records
+
+
+def _sam_record_to_region(record: dict, label: str) -> Region:
+    # x2/y2 are inclusive in SAM's grammar, hence the +1.
+    x = record["x1"] / record["w"]
+    y = record["y1"] / record["h"]
+    width = min(1.0 - x, (record["x2"] - record["x1"] + 1) / record["w"])
+    height = min(1.0 - y, (record["y2"] - record["y1"] + 1) / record["h"])
+    region = Region(x=x, y=y, width=width, height=height, label=label)
+    if not region.is_valid():
+        raise ValueError(f"SAM box out of bounds: {record}")
+    return region
+
+
+_CONCEPTS: dict[str, str] = {
+    "leak": "water stain", "crack": "wall crack",
+    "mould": "mould", "paint": "peeling paint",
+}
+
+
+def concept_for(filename: str = "", notes: str = "",
+                scenario: str = "") -> str:
+    """Map a fault to the single short noun phrase SAM needs.
+
+    SAM takes exactly one concept per request: lists, commands and
+    questions are unreliable per the official docs, so this never
+    passes raw user text through as the prompt.
+    """
+    if scenario and scenario in _CONCEPTS:
+        return _CONCEPTS[scenario]
+    name = pick_scenario(filename, notes, scenario)
+    return _CONCEPTS[name]
+
+
+def _extract_output_text(response: dict) -> str:
+    if isinstance(response.get("output_text"), str):
+        return response["output_text"]
+    texts = []
+    for item in response.get("output", []) or []:
+        if item.get("type") != "message":
+            continue
+        for part in item.get("content", []) or []:
+            if part.get("type") == "output_text" and part.get("text"):
+                texts.append(part["text"])
+    return "".join(texts)
+
+
+_DIAGNOSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "fault": {"type": "string"},
+        "fault_type": {"type": "string"},
+        "severity": {"type": "string",
+                     "enum": ["low", "moderate", "urgent"]},
+        "severity_reason": {"type": "string"},
+        "likely_cause": {"type": "string"},
+        "safety_warnings": {"type": "array", "items": {"type": "string"}},
+        "repair_steps": {"type": "array", "items": {"type": "string"}},
+        "parts": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"item": {"type": "string"},
+                           "quantity": {"type": "string"},
+                           "note": {"type": "string"}},
+            "required": ["item", "quantity"],
+            "additionalProperties": False}},
+        "difficulty": {"type": "string"},
+        "estimated_time": {"type": "string"},
+        "responsibility_hint": {"type": "string"},
+    },
+    "required": ["fault", "fault_type", "severity", "severity_reason",
+                 "likely_cause", "safety_warnings", "repair_steps",
+                 "parts", "difficulty", "estimated_time",
+                 "responsibility_hint"],
+    "additionalProperties": False,
+}
+
+
 class MetaModelProvider(Provider):
-    """STUB — intended Meta Model API integration. NOT wired.
+    """Real Meta Model API provider (SAM 3.1 + Muse Spark).
 
-    Intended endpoints (for later, after credits land and Wen confirms):
-      base_url: https://api.meta.ai/v1
-      segmentation model: sam-3.1
-      diagnosis model: muse-spark-1.3
+    Verified against the official docs (Oct 26, 2026): both models go
+    through POST {base}/responses; SAM's input is one user message
+    with input_text = a single short noun phrase plus input_image;
+    Spark structured output on Responses uses text.format, NOT
+    response_format (that returns 400).
 
-    This class deliberately has no api_key attribute, reads no
-    environment variable, and every method raises. That way no code
-    path in this scaffold can accidentally spend credits or call a
-    paid API. Wiring it is a separate, explicitly-approved step.
+    The key is NEVER in this file: it comes from the MODEL_API_KEY
+    environment variable only. No key -> every method raises, so the
+    server guard (app.py) can refuse to start in meta mode.
+    Mask raster decoding is deliberately left to the official
+    meta-sam-parser library in a follow-up: this step uses SAM's box
+    (converted to fractional Region coordinates) and keeps the raw
+    mask payload on the record for that follow-up.
+
+    Retries: 429 / 5xx / 404 model_not_found (the intermittent cloud
+    failure seen in Discord) up to 3 attempts with backoff. 400 is
+    never retried: the request itself is wrong.
     """
 
     BASE_URL = "https://api.meta.ai/v1"
     SEGMENTATION_MODEL = "sam-3.1"
     DIAGNOSIS_MODEL = "muse-spark-1.3"
+    _RETRYABLE = {404, 429, 500, 502, 503, 504}
 
-    def segment(self, _image_bytes: bytes, _prompt: str = "") -> Region:
-        raise RuntimeError(
-            "Meta Model API provider is NOT wired: no key is configured "
-            "and credits are still pending. Use MockProvider."
+    def __init__(self, api_key: str | None = None,
+                 request_fn=None):
+        # request_fn(payload) -> response dict: injectable seam so
+        # tests can run the full parse path with zero network.
+        self.api_key = api_key if api_key is not None else os.environ.get(
+            "MODEL_API_KEY", "")
+        self._request_fn = request_fn
+
+    def _require_key(self) -> str:
+        if not self.api_key:
+            raise RuntimeError(
+                "MODEL_API_KEY is not set: set it in the environment "
+                "before using the Meta provider. The key is never "
+                "stored in this repo.")
+        return self.api_key
+
+    def _call(self, payload: dict) -> dict:
+        if self._request_fn is not None:
+            return self._request_fn(payload)
+        key = self._require_key()
+        data = json.dumps(payload).encode("utf-8")
+        last_error: Exception | None = None
+        for attempt in range(3):
+            req = urllib.request.Request(
+                f"{self.BASE_URL}/responses", data=data, method="POST",
+                headers={"Authorization": f"Bearer {key}",
+                         "Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=120) as res:
+                    return json.loads(res.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code not in self._RETRYABLE or attempt == 2:
+                    raise RuntimeError(
+                        f"Meta Model API error {exc.code}: "
+                        f"{exc.read().decode('utf-8', 'replace')[:300]}"
+                    ) from exc
+                time.sleep(0.5 * (2 ** attempt))
+        raise RuntimeError(f"Meta Model API call failed: {last_error}")
+
+    def segment(self, image_bytes: bytes, prompt: str = "") -> Region:
+        if not image_bytes:
+            raise ValueError("photo bytes are empty")
+        self._require_key()
+        concept = concept_for(notes=prompt)
+        payload = {
+            "model": self.SEGMENTATION_MODEL,
+            "input": [{
+                "type": "message", "role": "user",
+                "content": [
+                    {"type": "input_text", "text": concept},
+                    {"type": "input_image",
+                     "image_url": _data_url(image_bytes)},
+                ],
+            }],
+        }
+        text = _extract_output_text(self._call(payload))
+        record = parse_sam_output_text(text)[0]
+        return _sam_record_to_region(record, f"{concept} (SAM region)")
+
+    def diagnose(self, image_bytes: bytes, region: Region,
+                 notes: str = "") -> Diagnosis:
+        if not image_bytes:
+            raise ValueError("photo bytes are empty")
+        self._require_key()
+        prompt = (
+            "You are a home-repair triage assistant. Look at the photo "
+            "and the segmented faulty region "
+            f"(x={region.x:.2f}, y={region.y:.2f}, "
+            f"width={region.width:.2f}, height={region.height:.2f}, "
+            f"label={region.label}). User notes: {notes or 'none'}. "
+            "Return a structured diagnosis: fault type, severity with "
+            "a reason, likely cause, safety warnings FIRST (water "
+            "near electrics, gas smell, structural risk, lead paint), "
+            "ordered repair steps, and a parts list with QUANTITIES "
+            "ONLY — never prices, never currency amounts. Difficulty "
+            "and time must be labelled estimates. The landlord/tenant "
+            "responsibility field is a hint only, never a legal ruling."
+        )
+        payload = {
+            "model": self.DIAGNOSIS_MODEL,
+            "input": [{
+                "type": "message", "role": "user",
+                "content": [
+                    {"type": "input_text", "text": prompt},
+                    {"type": "input_image",
+                     "image_url": _data_url(image_bytes)},
+                ],
+            }],
+            "text": {"format": {
+                "type": "json_schema",
+                "json_schema": {"name": "FixLensDiagnosis",
+                                "schema": _DIAGNOSIS_SCHEMA}}},
+        }
+        text = _extract_output_text(self._call(payload))
+        try:
+            raw = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                "Muse Spark returned non-JSON structured output") from exc
+        if raw.get("severity") not in SEVERITIES:
+            raise RuntimeError(
+                f"Muse Spark returned invalid severity: {raw.get('severity')!r}")
+        parts = [Part(item=p.get("item", ""), quantity=p.get("quantity", ""),
+                      note=p.get("note", ""))
+                 for p in raw.get("parts", [])]
+        ticket = _ticket(
+            f"{raw['fault']} — repair",
+            raw["fault"], raw["severity"],
+            f"Likely cause: {raw['likely_cause']}",
+            list(raw["repair_steps"][:2]),
+        )
+        return Diagnosis(
+            fault=raw["fault"], fault_type=raw["fault_type"],
+            severity=raw["severity"],
+            severity_reason=raw["severity_reason"],
+            likely_cause=raw["likely_cause"],
+            safety_warnings=list(raw["safety_warnings"]),
+            repair_steps=list(raw["repair_steps"]),
+            parts=parts, difficulty=raw["difficulty"],
+            estimated_time=raw["estimated_time"],
+            responsibility_hint=raw["responsibility_hint"],
+            ticket=ticket,
         )
 
-    def diagnose(self, _image_bytes: bytes, _region: Region,
-                 _notes: str = "") -> Diagnosis:
-        raise RuntimeError(
-            "Meta Model API provider is NOT wired: no key is configured "
-            "and credits are still pending. Use MockProvider."
-        )
-
-    def analyze(self, _photo_bytes: bytes, _filename: str = "",
-                _notes: str = "", _scenario: str = "") -> Analysis:
-        raise RuntimeError(
-            "Meta Model API provider is NOT wired: no key is configured "
-            "and credits are still pending. Use MockProvider. Do not call "
-            "this provider until credits are confirmed and Wen approves."
-        )
+    def analyze(self, photo_bytes: bytes, filename: str = "",
+                notes: str = "", scenario: str = "") -> Analysis:
+        if not photo_bytes:
+            raise ValueError("photo bytes are empty")
+        self._require_key()
+        # Concept must come from scenario/filename/notes, not from
+        # segment()'s prompt-only mapping, so pass it explicitly.
+        concept = concept_for(filename, notes, scenario)
+        payload = {
+            "model": self.SEGMENTATION_MODEL,
+            "input": [{
+                "type": "message", "role": "user",
+                "content": [
+                    {"type": "input_text", "text": concept},
+                    {"type": "input_image",
+                     "image_url": _data_url(photo_bytes)},
+                ],
+            }],
+        }
+        text = _extract_output_text(self._call(payload))
+        record = parse_sam_output_text(text)[0]
+        region = _sam_record_to_region(record, f"{concept} (SAM region)")
+        return Analysis(region=region,
+                        diagnosis=self.diagnose(photo_bytes, region, notes))
 
 
 def get_provider(name: str = "mock"):

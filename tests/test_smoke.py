@@ -3,7 +3,7 @@
 Covers the whole mock flow a demo needs:
   health endpoint -> upload page -> multipart upload -> JSON with a
   region, a diagnosis, repair steps, parts, and a ticket draft.
-Also asserts the Meta provider stub refuses to call anything, so no
+Also asserts the Meta provider refuses without a key, so no
 test path can accidentally spend credits.
 """
 
@@ -92,9 +92,9 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(diag["parts"])
         self.assertTrue(diag["ticket_draft"])
 
-    def test_meta_provider_never_calls(self):
+    def test_meta_provider_without_key_refuses(self):
         with self.assertRaises(RuntimeError):
-            MetaModelProvider().analyze(b"fake-bytes")
+            MetaModelProvider(api_key="").analyze(b"fake-bytes")
 
     def test_mock_provider_shape(self):
         analysis = MockProvider().analyze(b"fake-bytes")
@@ -148,17 +148,23 @@ class SchemaAndScenarioTest(unittest.TestCase):
         diag = provider.diagnose(b"fake-bytes", region)
         self.assertEqual(diag.fault_type, "wall_crack")
 
-    def test_meta_stub_segment_and_diagnose_raise(self):
-        stub = MetaModelProvider()
+    def test_meta_without_key_segment_and_diagnose_raise(self):
+        stub = MetaModelProvider(api_key="")
         with self.assertRaises(RuntimeError):
             stub.segment(b"fake-bytes", "leak")
         with self.assertRaises(RuntimeError):
             stub.diagnose(b"fake-bytes", Region(0.1, 0.1, 0.5, 0.5))
 
-    def test_mock_only_guard(self):
-        with mock.patch.dict(os.environ, {"FIXLENS_PROVIDER": "meta"}):
+    def test_provider_guard(self):
+        with mock.patch.dict(os.environ, {"FIXLENS_PROVIDER": "meta",
+                                          "MODEL_API_KEY": ""}):
             with self.assertRaises(RuntimeError):
                 build_provider()
+        with mock.patch.dict(os.environ, {"FIXLENS_PROVIDER": "meta",
+                                          "MODEL_API_KEY": "test-key"}):
+            provider, name = build_provider()
+            self.assertEqual(name, "meta")
+            self.assertEqual(provider.api_key, "test-key")
 
     def test_empty_photo_rejected_by_provider(self):
         with self.assertRaises(ValueError):

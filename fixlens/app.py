@@ -15,9 +15,10 @@ Validation (all failures are JSON 4xx, never a crash page):
   - no file part / empty file -> 400
   - file larger than MAX_UPLOAD_BYTES (10 MB) -> 413
 
-Safety: the server only ever serves the mock provider. If
-FIXLENS_PROVIDER is set to anything other than "mock", the server
-refuses to start rather than risk a paid API call.
+Safety: the server serves the mock provider by default. It serves
+the Meta provider only when FIXLENS_PROVIDER=meta AND the
+MODEL_API_KEY environment variable is set; otherwise it refuses to
+start rather than risk a misconfigured paid API call.
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
 INDEX_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>FixLens (mock demo)</title>
+<title>FixLens</title>
 <style>
 body{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em}
 .note{color:#666}
@@ -44,11 +45,8 @@ body{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 
 .draft{background:#fff3cd}
 table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.4em}
 </style></head><body>
-<h1>FixLens — mock demo</h1>
-<p class="note">Upload a photo of a home fault. This demo uses a MOCK
-provider: the region and diagnosis below are fixed demo output, not a
-real SAM / Muse Spark result. No API is called and nothing is spent.
-Ticket text is a DRAFT only — nothing is sent.</p>
+<h1>FixLens — __PROVIDER_LABEL__</h1>
+<p class="note">__PROVIDER_NOTE__ Ticket text is a DRAFT only — nothing is sent.</p>
 <form id="f" enctype="multipart/form-data">
 <p><input type="file" name="photo" accept="image/*" required></p>
 <p><label>Fault (optional, picks the mock scenario):
@@ -63,7 +61,7 @@ Ticket text is a DRAFT only — nothing is sent.</p>
 <p><label>Property: <input type="text" name="property" value="Example Property, Unit A"></label>
 <label>Tenant: <input type="text" name="tenant" value="Example Tenant"></label>
 <label>Landlord: <input type="text" name="landlord" value="Example Landlord"></label></p>
-<button type="submit">Analyze (mock)</button>
+<button type="submit">Analyze</button>
 </form>
 <div id="out"></div>
 <script>
@@ -71,7 +69,7 @@ function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','
 document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
   const out = document.getElementById('out');
-  out.innerHTML = '<p>Analyzing (mock)…</p>';
+  out.innerHTML = '<p>Analyzing…</p>';
   const res = await fetch('/api/diagnose', {method: 'POST', body: new FormData(e.target)});
   const d = await res.json();
   if (!res.ok) { out.innerHTML = '<p>Error: ' + esc(d.error || res.status) + '</p>'; return; }
@@ -136,17 +134,25 @@ def _parse_multipart(body: bytes, boundary: bytes):
 
 def build_provider():
     name = os.environ.get("FIXLENS_PROVIDER", "mock")
-    if name != "mock":
-        raise RuntimeError(
-            f"Refusing to start with FIXLENS_PROVIDER={name!r}: only "
-            "'mock' is wired in this scaffold. The Meta provider is a "
-            "stub and must not be served until credits land and Wen approves."
-        )
-    return get_provider("mock")
+    if name == "mock":
+        return get_provider("mock"), "mock"
+    if name == "meta":
+        provider = get_provider("meta")
+        if not provider.api_key:
+            raise RuntimeError(
+                "Refusing to start with FIXLENS_PROVIDER='meta': "
+                "MODEL_API_KEY is not set in the environment."
+            )
+        return provider, "meta"
+    raise RuntimeError(
+        f"Refusing to start with FIXLENS_PROVIDER={name!r}: only "
+        "'mock' and 'meta' are supported."
+    )
 
 
 class Handler(BaseHTTPRequestHandler):
     provider = None  # set by make_server()
+    provider_name = "mock"
 
     def log_message(self, *args):  # keep test output clean
         pass
@@ -161,9 +167,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802 - stdlib naming
         if self.path == "/health":
-            self._send_json(200, {"status": "ok", "provider": "mock"})
+            self._send_json(200, {"status": "ok",
+                                  "provider": self.provider_name})
         elif self.path in ("/", "/index.html"):
-            data = INDEX_HTML.encode("utf-8")
+            if self.provider_name == "meta":
+                label = "Meta Model API (SAM 3.1 + Muse Spark)"
+                note = ("Upload a photo of a home fault. This demo "
+                        "calls the Meta Model API: SAM 3.1 segments "
+                        "the faulty region and Muse Spark writes the "
+                        "structured diagnosis. No prices are shown.")
+            else:
+                label = "mock demo"
+                note = ("Upload a photo of a home fault. This demo "
+                        "uses a MOCK provider: the region and "
+                        "diagnosis below are fixed demo output, not "
+                        "a real SAM / Muse Spark result. No API is "
+                        "called and nothing is spent.")
+            page = INDEX_HTML.replace("__PROVIDER_LABEL__", label)
+            page = page.replace("__PROVIDER_NOTE__", note)
+            data = page.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(data)))
@@ -210,7 +232,7 @@ class Handler(BaseHTTPRequestHandler):
         diagnosis = with_ticket_overrides(analysis.diagnosis, fields)
         analysis = type(analysis)(region=analysis.region, diagnosis=diagnosis)
         self._send_json(200, {
-            "provider": "mock",
+            "provider": self.provider_name,
             "filename": html.escape(filename),
             "size_bytes": len(photo_bytes),
             **analysis.to_dict(),
@@ -218,6 +240,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(port: int = 0) -> ThreadingHTTPServer:
-    provider = build_provider()
-    handler = type("FixLensHandler", (Handler,), {"provider": provider})
+    provider, provider_name = build_provider()
+    handler = type("FixLensHandler", (Handler,),
+                   {"provider": provider, "provider_name": provider_name})
     return ThreadingHTTPServer(("127.0.0.1", port), handler)
