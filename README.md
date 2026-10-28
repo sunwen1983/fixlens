@@ -99,14 +99,18 @@ Endpoints: `GET /` (upload page), `GET /health`,
    largest-area region) and `.diagnose()` (Muse Spark: photo + region
    → the exact JSON shape the mock already returns) are implemented
    and tested with canned responses.
-3. Live verification (not yet done): run a real fault photo through
-   meta mode and confirm the box and diagnosis come back, before
-   recording the demo video.
+3. Live verification (done Oct 27 late): a real fault photo ran
+   through meta mode and the box + diagnosis came back, in-page
+   rendering, ~$0.01 charged — before recording the demo video.
 
 ## Still needed before the demo is real
 
-- Mac live-test result for meta mode (real photo, real API).
-- 2–3 real sample fault photos (leak stain, crack, etc.).
-- Ticket wording approval (example names/address are placeholders).
+- Mac live-test result for meta mode: DONE Oct 27 late (real
+  SAM 3.1 + Muse Spark end-to-end, in-page rendering).
+- 2–3 real sample fault photos (leak stain, crack, etc.) — still
+  needed; web photos were live-test only, video must use real faults.
+- Ticket wording: DONE — wording delegated to Mila Oct 27, content
+  unchanged, reformatted to labeled multi-line (example
+  names/address remain placeholders).
 - Official hackathon rules / submission format — see SUBMISSION.md
   (verified against the official participant guide Oct 26, 2026).
