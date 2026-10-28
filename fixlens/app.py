@@ -237,6 +237,13 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as exc:
             self._send_json(400, {"error": str(exc)})
             return
+        except RuntimeError as exc:
+            # Meta provider API failures (auth, model, network after
+            # retries) must surface as a JSON 502, never as a dropped
+            # connection: an uncaught exception here closes the socket
+            # with an empty reply (curl 52) and hides the real error.
+            self._send_json(502, {"error": str(exc)})
+            return
         diagnosis = with_ticket_overrides(analysis.diagnosis, fields)
         analysis = type(analysis)(region=analysis.region, diagnosis=diagnosis)
         self._send_json(200, {

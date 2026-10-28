@@ -253,5 +253,47 @@ class ValidationTest(SmokeTest):
         self.assertEqual(payload["diagnosis"]["ticket"]["status"], "draft")
 
 
+class ProviderFailureTest(unittest.TestCase):
+    """A provider RuntimeError (e.g. Meta API failure) must return a
+    JSON 502, never drop the connection (regression: curl 52 empty
+    reply on the Oct 27 Mac live test)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = make_server(0)
+        cls.port = cls.server.server_address[1]
+
+        class FailingProvider:
+            def analyze(self, *args, **kwargs):
+                raise RuntimeError(
+                    "Meta Model API call failed: HTTP 401")
+
+        cls.server.RequestHandlerClass.provider = FailingProvider()
+        cls.thread = threading.Thread(target=cls.server.serve_forever,
+                                      daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def test_provider_runtime_error_returns_502_json(self):
+        body, boundary = _multipart("photo", "leak.png", FAKE_PNG)
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/diagnose",
+            data=body, method="POST",
+            headers={"Content-Type":
+                     f"multipart/form-data; boundary={boundary}"},
+        )
+        try:
+            with urllib.request.urlopen(req) as res:
+                status, payload = res.status, json.loads(res.read())
+        except urllib.error.HTTPError as exc:
+            status, payload = exc.code, json.loads(exc.read())
+        self.assertEqual(status, 502)
+        self.assertIn("401", payload["error"])
+
+
 if __name__ == "__main__":
     unittest.main()
