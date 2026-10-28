@@ -667,7 +667,7 @@ class MetaModelProvider(Provider):
                 if exc.code not in self._RETRYABLE or attempt == 2:
                     raise RuntimeError(
                         f"Meta Model API error {exc.code}: "
-                        f"{exc.read().decode('utf-8', 'replace')[:300]}"
+                        f"{exc.read().decode('utf-8', 'replace')[:3000]}"
                     ) from exc
                 time.sleep(0.5 * (2 ** attempt))
         raise RuntimeError(f"Meta Model API call failed: {last_error}")
