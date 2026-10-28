@@ -742,8 +742,8 @@ class MetaModelProvider(Provider):
             }],
             "text": {"format": {
                 "type": "json_schema",
-                "json_schema": {"name": "FixLensDiagnosis",
-                                "schema": _DIAGNOSIS_SCHEMA}}},
+                "name": "FixLensDiagnosis",
+                "schema": _DIAGNOSIS_SCHEMA}},
         }
         text = _extract_output_text(self._call(payload))
         try:

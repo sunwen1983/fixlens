@@ -108,9 +108,16 @@ class MetaProviderCannedTest(unittest.TestCase):
         self.assertEqual(sam_text, "water stain")
         self.assertEqual(spark_payload["model"], "muse-spark-1.3")
         # Responses structured output: text.format, never response_format.
+        # Meta's Responses shape puts name/schema flat on format (the
+        # nested json_schema object is the Chat Completions shape and
+        # the live API rejects it: "text.format missing required
+        # field name", Oct 27 Mac live test).
         self.assertIn("text", spark_payload)
         self.assertEqual(spark_payload["text"]["format"]["type"],
                          "json_schema")
+        self.assertEqual(spark_payload["text"]["format"]["name"],
+                         "FixLensDiagnosis")
+        self.assertNotIn("json_schema", spark_payload["text"]["format"])
         self.assertNotIn("response_format", spark_payload)
         region = analysis.region
         self.assertAlmostEqual(region.x, 0.25)
