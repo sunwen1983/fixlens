@@ -99,6 +99,26 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(diag["parts"])
         self.assertTrue(diag["ticket_draft"])
 
+    def test_native_post_returns_rendered_html_not_raw_json(self):
+        # A native form POST (Accept: text/html, page JS not running)
+        # must get the photo + red box + diagnosis as a page, never
+        # a raw JSON document: that was the Oct 27 Mac browser result.
+        body, boundary = _multipart("photo", "leak.png", FAKE_PNG)
+        req = urllib.request.Request(
+            self._url("/api/diagnose"), data=body, method="POST",
+            headers={"Content-Type":
+                     f"multipart/form-data; boundary={boundary}",
+                     "Accept": "text/html,application/xhtml+xml"},
+        )
+        with urllib.request.urlopen(req) as res:
+            self.assertIn("text/html", res.headers["Content-Type"])
+            page = res.read().decode()
+        self.assertIn("<img", page)
+        self.assertIn("border:3px solid #e53935", page)
+        self.assertIn("Safety first", page)
+        self.assertIn("DRAFT", page)
+        self.assertNotIn('"provider": "mock"', page)
+
     def test_meta_provider_without_key_refuses(self):
         with self.assertRaises(RuntimeError):
             MetaModelProvider(api_key="").analyze(b"fake-bytes")

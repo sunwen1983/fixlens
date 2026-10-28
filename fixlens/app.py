@@ -159,6 +159,66 @@ def build_provider():
     )
 
 
+def render_result_html(provider_name: str, filename: str,
+                       photo_data_url_str: str, result: dict) -> str:
+    """Server-rendered diagnosis page for a native form POST.
+
+    A browser that submits the upload form natively (page JavaScript
+    not running, e.g. JS blocked) sends Accept: text/html and would
+    otherwise get a raw JSON document with no photo and no box. This
+    page renders the same result server-side: photo + red SAM box,
+    safety warnings, repair checklist, parts, and the draft ticket in
+    a textarea so it can be copied without any JavaScript.
+    """
+    region = result["region"]
+    diag = result["diagnosis"]
+    ticket = diag["ticket"]
+    warn = "".join(f"<li>{html.escape(w)}</li>"
+                   for w in diag["safety_warnings"])
+    steps = "".join(f"<li><input type='checkbox'> {html.escape(s)}</li>"
+                    for s in diag["repair_steps"])
+    parts = "".join(
+        f"<tr><td>{html.escape(p['item'])}</td>"
+        f"<td>{html.escape(p['quantity'])}</td>"
+        f"<td>{html.escape(p['note'])}</td></tr>"
+        for p in diag["parts"])
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>FixLens — diagnosis</title>
+<style>
+body{{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em}}
+.warn{{background:#fdecea;border:1px solid #e57373;padding:1em}}
+.card{{border:1px solid #ccc;padding:1em;margin:1em 0}}
+.draft{{background:#fff3cd}}
+table{{border-collapse:collapse}}td,th{{border:1px solid #ccc;padding:.4em}}
+textarea{{width:100%}}
+</style></head><body>
+<h1>FixLens — {html.escape(provider_name)}</h1>
+<p><a href="/">← Upload another photo</a> · File: {html.escape(filename)}</p>
+<div class="warn"><h2>⚠ Safety first</h2><ul>{warn}</ul></div>
+<div class="card"><h2>{html.escape(diag['fault'])}</h2>
+<p>Severity: <b>{html.escape(diag['severity'])}</b> — {html.escape(diag['severity_reason'])}</p>
+<p>Likely cause: {html.escape(diag['likely_cause'])}</p>
+<p>Difficulty: {html.escape(diag['difficulty'])} · Estimated time: {html.escape(diag['estimated_time'])}</p>
+<p>{html.escape(diag['responsibility_hint'])}</p>
+<p>Segmented region: {html.escape(region['label'])}</p>
+<div style="position:relative;display:inline-block;max-width:100%">
+<img src="{html.escape(photo_data_url_str)}" style="max-width:100%;display:block">
+<div style="position:absolute;left:{region['x'] * 100}%;top:{region['y'] * 100}%;width:{region['width'] * 100}%;height:{region['height'] * 100}%;border:3px solid #e53935;box-sizing:border-box">
+<span style="background:#e53935;color:#fff;padding:0 .3em;font-size:.85em">{html.escape(region['label'])}</span></div></div></div>
+<div class="card"><h2>Repair checklist</h2><ul>{steps}</ul>
+<h2>Parts list (quantities only — no prices)</h2>
+<table><tr><th>Item</th><th>Quantity</th><th>Note</th></tr>{parts}</table></div>
+<div class="card draft"><h2>Repair ticket — DRAFT, not sent</h2>
+<p><b>{html.escape(ticket['title'])}</b> · {html.escape(ticket['property'])}</p>
+<p>{html.escape(ticket['description'])}</p>
+<p>Next steps: {html.escape('; '.join(ticket['next_steps']))}</p>
+<p>Tenant: {html.escape(ticket['tenant'])} · Landlord: {html.escape(ticket['landlord'])}</p>
+<textarea readonly rows="6">{html.escape(diag['ticket_draft'])}</textarea></div>
+</body></html>
+"""
+
+
 class Handler(BaseHTTPRequestHandler):
     provider = None  # set by make_server()
     provider_name = "mock"
@@ -247,13 +307,29 @@ class Handler(BaseHTTPRequestHandler):
             return
         diagnosis = with_ticket_overrides(analysis.diagnosis, fields)
         analysis = type(analysis)(region=analysis.region, diagnosis=diagnosis)
-        self._send_json(200, {
+        payload = {
             "provider": self.provider_name,
             "filename": html.escape(filename),
             "size_bytes": len(photo_bytes),
             "photo_data_url": photo_data_url(photo_bytes),
             **analysis.to_dict(),
-        })
+        }
+        # Native form POSTs arrive with Accept: text/html (a fetch
+        # sends */*). Answer those with the server-rendered page so a
+        # browser with page JavaScript not running still shows the
+        # photo, the red box, and the diagnosis instead of raw JSON.
+        if "text/html" in self.headers.get("Accept", ""):
+            page = render_result_html(
+                self.provider_name, filename,
+                photo_data_url(photo_bytes), analysis.to_dict())
+            data = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
+        self._send_json(200, payload)
 
 
 def make_server(port: int = 0) -> ThreadingHTTPServer:
