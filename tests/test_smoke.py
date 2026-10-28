@@ -74,6 +74,10 @@ class SmokeTest(unittest.TestCase):
         self.assertIn("photo", page)
         self.assertIn("Copy ticket", page)
         self.assertIn("ticket-text", page)
+        # Submit wiring must not depend on addEventListener alone:
+        # inline onsubmit + native POST fallback to /api/diagnose.
+        self.assertIn("analyzeForm", page)
+        self.assertIn('action="/api/diagnose"', page)
 
     def test_upload_to_mock_diagnosis(self):
         body, boundary = _multipart("photo", "leak.png", FAKE_PNG)

@@ -47,7 +47,7 @@ table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.4em}
 </style></head><body>
 <h1>FixLens — __PROVIDER_LABEL__</h1>
 <p class="note">__PROVIDER_NOTE__ Ticket text is a DRAFT only — nothing is sent.</p>
-<form id="f" enctype="multipart/form-data">
+<form id="f" action="/api/diagnose" method="POST" enctype="multipart/form-data" onsubmit="return analyzeForm(event)">
 <p><input type="file" name="photo" accept="image/*" required></p>
 <p><label>Fault (optional, picks the mock scenario):
 <select name="scenario">
@@ -66,7 +66,7 @@ table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.4em}
 <div id="out"></div>
 <script>
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-document.getElementById('f').addEventListener('submit', async (e) => {
+async function analyzeForm(e) {
   e.preventDefault();
   const out = document.getElementById('out');
   out.innerHTML = '<p>Analyzing…</p>';
@@ -100,7 +100,8 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     '<p>Tenant: ' + esc(t.tenant) + ' · Landlord: ' + esc(t.landlord) + '</p>' +
     '<p id="ticket-text">' + esc(diag.ticket_draft) + '</p>' +
     '<button onclick="navigator.clipboard.writeText(document.getElementById(\'ticket-text\').textContent)">Copy ticket</button></div>';
-});
+  return false;
+}
 </script>
 </body></html>
 """
