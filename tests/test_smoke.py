@@ -78,6 +78,14 @@ class SmokeTest(unittest.TestCase):
         # inline onsubmit + native POST fallback to /api/diagnose.
         self.assertIn("analyzeForm", page)
         self.assertIn('action="/api/diagnose"', page)
+        # No nested-quote onclick in the script: a single-quoted JS
+        # string containing getElementById('ticket-text') is a
+        # SyntaxError in the SERVED page (Python strips \' when the
+        # module string is built), which killed the whole script and
+        # left only the native POST path working. Copy is wired by
+        # id + addEventListener instead.
+        self.assertIn("ticket-copy", page)
+        self.assertNotIn('onclick="navigator.clipboard', page)
 
     def test_upload_to_mock_diagnosis(self):
         body, boundary = _multipart("photo", "leak.png", FAKE_PNG)
