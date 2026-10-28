@@ -98,6 +98,9 @@ class SmokeTest(unittest.TestCase):
         self.assertTrue(diag["repair_steps"])
         self.assertTrue(diag["parts"])
         self.assertTrue(diag["ticket_draft"])
+        # Ticket draft is multi-line (labeled lines + bulleted steps),
+        # not one long sentence, so it pastes cleanly to a landlord.
+        self.assertIn("\n- ", diag["ticket_draft"])
 
     def test_native_post_returns_rendered_html_not_raw_json(self):
         # A native form POST (Accept: text/html, page JS not running)

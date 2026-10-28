@@ -32,22 +32,36 @@ from .providers import get_provider, photo_data_url, with_ticket_overrides
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Shared page style (upload page + server-rendered result page).
+# Plain string on purpose: it is interpolated into an f-string in
+# render_result_html, so it must not contain bare { } itself.
+_PAGE_STYLE = """
+body{font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:#f4f5f7;color:#1f2937;max-width:760px;margin:2.5em auto;padding:0 1.25em;line-height:1.55}
+h1{font-size:1.6em;margin-bottom:.2em}
+h2{font-size:1.15em;margin-top:0}
+.note{color:#6b7280}
+.badge{display:inline-block;background:#e5e7eb;border-radius:999px;padding:.15em .6em;font-size:.85em;font-weight:600}
+.warn{background:#fef2f2;border:1px solid #fecaca;border-left:5px solid #e53935;border-radius:12px;padding:1em 1.25em}
+.warn h2{color:#b91c1c}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:1.25em 1.5em;margin:1.25em 0;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.draft{background:#fffbeb;border-color:#fde68a}
+button{background:#1f2937;color:#fff;border:0;border-radius:8px;padding:.6em 1.4em;font-size:1em;cursor:pointer}
+button:hover{background:#374151}
+input[type=text],select{border:1px solid #d1d5db;border-radius:8px;padding:.45em .6em;font-size:1em;background:#fff}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #e5e7eb;padding:.5em .6em;text-align:left}th{background:#f9fafb}
+textarea{width:100%;border:1px solid #e5e7eb;border-radius:8px;padding:.6em;font:1em/1.5 system-ui,sans-serif;box-sizing:border-box}
+img{border-radius:8px}
+ul{padding-left:1.25em}li{margin:.35em 0}
+a{color:#1d4ed8}
+"""
+
 INDEX_HTML = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>FixLens</title>
-<style>
-body{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em}
-.note{color:#666}
-.warn{background:#fdecea;border:1px solid #e57373;padding:1em}
-.warn h2{margin-top:0}
-.card{border:1px solid #ccc;padding:1em;margin:1em 0}
-.badge{background:#eee;padding:.2em .5em}
-.draft{background:#fff3cd}
-table{border-collapse:collapse}td,th{border:1px solid #ccc;padding:.4em}
-</style></head><body>
+<style>__PAGE_STYLE__</style></head><body>
 <h1>FixLens — __PROVIDER_LABEL__</h1>
 <p class="note">__PROVIDER_NOTE__ Ticket text is a DRAFT only — nothing is sent.</p>
-<form id="f" action="/api/diagnose" method="POST" enctype="multipart/form-data" onsubmit="return analyzeForm(event)">
+<form id="f" class="card" action="/api/diagnose" method="POST" enctype="multipart/form-data" onsubmit="return analyzeForm(event)">
 <p><input type="file" name="photo" accept="image/*" required></p>
 <p><label>Fault (optional, picks the mock scenario):
 <select name="scenario">
@@ -85,7 +99,7 @@ async function analyzeForm(e) {
   out.innerHTML =
     '<div class="warn"><h2>⚠ Safety first</h2><ul>' + warn + '</ul></div>' +
     '<div class="card"><h2>' + esc(diag.fault) + '</h2>' +
-    '<p>Severity: <b>' + esc(diag.severity) + '</b> — ' + esc(diag.severity_reason) + '</p>' +
+    '<p>Severity: <span class="badge">' + esc(diag.severity) + '</span> — ' + esc(diag.severity_reason) + '</p>' +
     '<p>Likely cause: ' + esc(diag.likely_cause) + '</p>' +
     '<p>Difficulty: ' + esc(diag.difficulty) + ' · Estimated time: ' + esc(diag.estimated_time) + '</p>' +
     '<p>' + esc(diag.responsibility_hint) + '</p>' +
@@ -185,19 +199,12 @@ def render_result_html(provider_name: str, filename: str,
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>FixLens — diagnosis</title>
-<style>
-body{{font-family:system-ui,sans-serif;max-width:720px;margin:2em auto;padding:0 1em}}
-.warn{{background:#fdecea;border:1px solid #e57373;padding:1em}}
-.card{{border:1px solid #ccc;padding:1em;margin:1em 0}}
-.draft{{background:#fff3cd}}
-table{{border-collapse:collapse}}td,th{{border:1px solid #ccc;padding:.4em}}
-textarea{{width:100%}}
-</style></head><body>
+<style>{_PAGE_STYLE}</style></head><body>
 <h1>FixLens — {html.escape(provider_name)}</h1>
 <p><a href="/">← Upload another photo</a> · File: {html.escape(filename)}</p>
 <div class="warn"><h2>⚠ Safety first</h2><ul>{warn}</ul></div>
 <div class="card"><h2>{html.escape(diag['fault'])}</h2>
-<p>Severity: <b>{html.escape(diag['severity'])}</b> — {html.escape(diag['severity_reason'])}</p>
+<p>Severity: <span class="badge">{html.escape(diag['severity'])}</span> — {html.escape(diag['severity_reason'])}</p>
 <p>Likely cause: {html.escape(diag['likely_cause'])}</p>
 <p>Difficulty: {html.escape(diag['difficulty'])} · Estimated time: {html.escape(diag['estimated_time'])}</p>
 <p>{html.escape(diag['responsibility_hint'])}</p>
@@ -254,6 +261,7 @@ class Handler(BaseHTTPRequestHandler):
                         "called and nothing is spent.")
             page = INDEX_HTML.replace("__PROVIDER_LABEL__", label)
             page = page.replace("__PROVIDER_NOTE__", note)
+            page = page.replace("__PAGE_STYLE__", _PAGE_STYLE)
             data = page.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")

@@ -107,12 +107,18 @@ class Ticket:
         }
 
     def draft_text(self) -> str:
-        steps = "; ".join(self.next_steps) if self.next_steps else "TBD"
+        # Multi-line: a ticket copied to a landlord/tenant reads far
+        # better broken into labeled lines than as one long sentence.
+        steps = "\n".join(f"- {s}" for s in self.next_steps) \
+            if self.next_steps else "TBD"
         return (
-            f"[DRAFT — not sent] Repair ticket: {self.title}. "
-            f"Property: {self.property}. Fault: {self.fault}. "
-            f"Severity: {self.severity}. {self.description} "
-            f"Next steps: {steps}."
+            f"[DRAFT — not sent]\n"
+            f"Repair ticket: {self.title}\n"
+            f"Property: {self.property}\n"
+            f"Fault: {self.fault}\n"
+            f"Severity: {self.severity}\n"
+            f"{self.description}\n"
+            f"Next steps:\n{steps}"
         )
 
 
