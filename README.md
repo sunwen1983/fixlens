@@ -66,7 +66,20 @@ FIXLENS_PROVIDER=meta MODEL_API_KEY=<your key> python3 run.py
 python3 -m unittest discover -s tests -v   # full test suite
 ```
 
-Requirements: Python 3.11+, standard library only — no pip installs.
+Requirements: Python 3.11+, standard library only — no pip installs,
+except one optional package for the pixel-mask overlay (below).
+
+Mask overlay (optional): with Meta's official parser installed, the
+photo also gets a pixel-level SAM mask highlight inside the red box:
+
+```bash
+pip install "meta-sam-parser==0.1.0"   # zero-dependency itself
+```
+
+Without it, the app still works exactly as before — red box only.
+The mask is decoded with Meta's own parser (never hand-rolled), and
+any decode failure degrades to box-only rather than breaking the
+diagnosis.
 Endpoints: `GET /` (upload page), `GET /health`,
 `POST /api/diagnose` (multipart `photo` + optional `scenario`,
 `notes`, `property`, `tenant`, `landlord`).

@@ -17,7 +17,7 @@ order; timings add up to 180 seconds.
 |------|------|------------------------------|
 | 0–20s | Problem, firsthand | "As a landlord, I get photos like this: 'something is wrong.' Guessing costs days." Show the tenant photo. State: built during this hackathon, solo Indie track, Build for Your World. |
 | 20–30s | Photo | "A tenant sends this photo: a stain on the ceiling." Upload the photo. |
-| 30–50s | Segmentation overlay | The faulty region is highlighted on the photo with a red box. "FixLens first finds *where* the fault is — SAM 3.1 segmentation — so the diagnosis is grounded in a visible area, not the whole photo." Record this shot with the live Meta API call. |
+| 30–50s | Segmentation overlay | The faulty region is highlighted on the photo with a pixel-level SAM mask inside the red box. "FixLens first finds *where* the fault is — SAM 3.1 segmentation — so the diagnosis is grounded in a visible area, not the whole photo." Record this shot with the live Meta API call. |
 | 50–80s | Diagnosis card | Fault + severity + triage reason. "Moderate: water damage spreads and can cause mould, but there is no active flooding here." Then the safety box, read first: water near electrics, gas-smell warning. |
 | 80–120s | Checklist + parts | Tickable repair steps in order (inspect plumbing above → dry 24–48h → repair source, then patch and repaint) and a parts list with quantities only — no prices. Stress: this is a multi-step workflow ending in action, not a one-label image analysis. |
 | 120–160s | Ticket draft | "And one click drafts the repair ticket — property, fault, severity, next steps — marked DRAFT, nothing sent." Show the ticket fields and the DRAFT status. |

@@ -78,6 +78,8 @@ class SmokeTest(unittest.TestCase):
         # inline onsubmit + native POST fallback to /api/diagnose.
         self.assertIn("analyzeForm", page)
         self.assertIn('action="/api/diagnose"', page)
+        # JS render path knows about the mask overlay field.
+        self.assertIn("mask_overlay_data_url", page)
         # No nested-quote onclick in the script: a single-quoted JS
         # string containing getElementById('ticket-text') is a
         # SyntaxError in the SERVED page (Python strips \' when the

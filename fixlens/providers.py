@@ -23,15 +23,31 @@ hints only — never a legal determination.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
+import struct
 import time
 import urllib.error
 import urllib.request
+import zlib
 from dataclasses import dataclass, field, replace
 
 SEVERITIES = ("low", "moderate", "urgent")
+
+
+@dataclass(frozen=True)
+class Mask:
+    """A decoded SAM pixel mask: 1 byte per pixel, 1 = fault, 0 = not.
+
+    The grid is box-local: it maps onto the Region's box, not onto
+    the whole photo (official meta-sam-parser semantics).
+    """
+
+    raster: bytes
+    width: int
+    height: int
 
 
 @dataclass(frozen=True)
@@ -43,6 +59,7 @@ class Region:
     width: float
     height: float
     label: str = "faulty area"
+    mask: Mask | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -542,10 +559,77 @@ def _sam_record_to_region(record: dict, label: str) -> Region:
     y = record["y1"] / record["h"]
     width = min(1.0 - x, (record["x2"] - record["x1"] + 1) / record["w"])
     height = min(1.0 - y, (record["y2"] - record["y1"] + 1) / record["h"])
-    region = Region(x=x, y=y, width=width, height=height, label=label)
+    region = Region(x=x, y=y, width=width, height=height, label=label,
+                    mask=_decode_sam_mask(record))
     if not region.is_valid():
         raise ValueError(f"SAM box out of bounds: {record}")
     return region
+
+
+try:
+    # Meta's official SAM parser (zero-dependency itself). It is an
+    # optional dependency on purpose: without it the box overlay
+    # still works and the mask is simply skipped, so a missing
+    # package can never break a diagnosis.
+    from meta_sam_parser import SegmentationMask, decode_mask_to_raster
+    _HAS_SAM_PARSER = True
+except ImportError:  # pragma: no cover - exercised when uninstalled
+    _HAS_SAM_PARSER = False
+
+
+def _decode_sam_mask(record: dict) -> Mask | None:
+    """Decode one SAM record's pixel mask, or None.
+
+    The record's payload is the base85 text after its encoding
+    marker (~ lossless, ! one_bit); the official parser wants the
+    marker re-attached. Any failure degrades to box-only: a bad mask
+    must never lose the diagnosis it came with.
+    """
+    if not _HAS_SAM_PARSER:
+        return None
+    try:
+        marker = record.get("mask_encoding")
+        payload = record.get("mask_payload")
+        width = int(record.get("mask_width", 0))
+        height = int(record.get("mask_height", 0))
+        if marker not in ("~", "!") or not payload or width <= 0 or height <= 0:
+            return None
+        mask = SegmentationMask(
+            encoding="lossless" if marker == "~" else "one_bit",
+            payload=marker + payload,
+            width=width,
+            height=height,
+        )
+        raster = bytes(decode_mask_to_raster(mask))
+    except Exception:
+        return None
+    if len(raster) != width * height:
+        return None
+    return Mask(raster=raster, width=width, height=height)
+
+
+def mask_png_data_url(mask: Mask) -> str:
+    """Render a binary mask as a semi-transparent red PNG data URL.
+
+    Pure stdlib (struct + zlib): 8-bit RGBA, filter-none rows.
+    Fault pixels are red at ~43% opacity; everything else is fully
+    transparent, so the photo shows through around the fault.
+    """
+    def chunk(typ: bytes, data: bytes) -> bytes:
+        body = struct.pack(">I", len(data)) + typ + data
+        return body + struct.pack(">I", zlib.crc32(typ + data) & 0xFFFFFFFF)
+
+    raw = bytearray()
+    for y in range(mask.height):
+        raw.append(0)
+        for value in mask.raster[y * mask.width:(y + 1) * mask.width]:
+            raw.extend((229, 57, 53, 110) if value else (0, 0, 0, 0))
+    png = (b"\x89PNG\r\n\x1a\n"
+           + chunk(b"IHDR", struct.pack(">IIBBBBB", mask.width,
+                                        mask.height, 8, 6, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(bytes(raw)))
+           + chunk(b"IEND", b""))
+    return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
 
 
 _CONCEPTS: dict[str, str] = {

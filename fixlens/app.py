@@ -28,7 +28,8 @@ import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .providers import get_provider, photo_data_url, with_ticket_overrides
+from .providers import (get_provider, mask_png_data_url, photo_data_url,
+                        with_ticket_overrides)
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 
@@ -92,9 +93,11 @@ async function analyzeForm(e) {
   const steps = diag.repair_steps.map(s => '<li><input type="checkbox"> ' + esc(s) + '</li>').join('');
   const parts = diag.parts.map(p => '<tr><td>' + esc(p.item) + '</td><td>' + esc(p.quantity) + '</td><td>' + esc(p.note) + '</td></tr>').join('');
   const r = d.region;
+  const maskImg = d.mask_overlay_data_url ? '<img src="' + esc(d.mask_overlay_data_url) + '" style="position:absolute;left:0;top:0;width:100%;height:100%">' : '';
   const photo = '<div style="position:relative;display:inline-block;max-width:100%">' +
     '<img src="' + esc(d.photo_data_url) + '" style="max-width:100%;display:block">' +
     '<div style="position:absolute;left:' + (r.x * 100) + '%;top:' + (r.y * 100) + '%;width:' + (r.width * 100) + '%;height:' + (r.height * 100) + '%;border:3px solid #e53935;box-sizing:border-box">' +
+    maskImg +
     '<span style="background:#e53935;color:#fff;padding:0 .3em;font-size:.85em">' + esc(r.label) + '</span></div></div>';
   out.innerHTML =
     '<div class="warn"><h2>⚠ Safety first</h2><ul>' + warn + '</ul></div>' +
@@ -177,7 +180,8 @@ def build_provider():
 
 
 def render_result_html(provider_name: str, filename: str,
-                       photo_data_url_str: str, result: dict) -> str:
+                       photo_data_url_str: str, result: dict,
+                       mask_overlay_data_url: str | None = None) -> str:
     """Server-rendered diagnosis page for a native form POST.
 
     A browser that submits the upload form natively (page JavaScript
@@ -199,6 +203,12 @@ def render_result_html(provider_name: str, filename: str,
         f"<td>{html.escape(p['quantity'])}</td>"
         f"<td>{html.escape(p['note'])}</td></tr>"
         for p in diag["parts"])
+    # The mask grid is box-local: the overlay image sits inside the
+    # box div at 100%x100%, never stretched over the whole photo.
+    mask_img = (
+        f'<img src="{html.escape(mask_overlay_data_url)}" '
+        'style="position:absolute;left:0;top:0;width:100%;height:100%">'
+        if mask_overlay_data_url else "")
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <title>FixLens — diagnosis</title>
@@ -215,7 +225,7 @@ def render_result_html(provider_name: str, filename: str,
 <div style="position:relative;display:inline-block;max-width:100%">
 <img src="{html.escape(photo_data_url_str)}" style="max-width:100%;display:block">
 <div style="position:absolute;left:{region['x'] * 100}%;top:{region['y'] * 100}%;width:{region['width'] * 100}%;height:{region['height'] * 100}%;border:3px solid #e53935;box-sizing:border-box">
-<span style="background:#e53935;color:#fff;padding:0 .3em;font-size:.85em">{html.escape(region['label'])}</span></div></div></div>
+{mask_img}<span style="background:#e53935;color:#fff;padding:0 .3em;font-size:.85em">{html.escape(region['label'])}</span></div></div></div>
 <div class="card"><h2>Repair checklist</h2><ul>{steps}</ul>
 <h2>Parts list (quantities only — no prices)</h2>
 <table><tr><th>Item</th><th>Quantity</th><th>Note</th></tr>{parts}</table></div>
@@ -323,6 +333,9 @@ class Handler(BaseHTTPRequestHandler):
             "filename": html.escape(filename),
             "size_bytes": len(photo_bytes),
             "photo_data_url": photo_data_url(photo_bytes),
+            "mask_overlay_data_url": (
+                mask_png_data_url(analysis.region.mask)
+                if analysis.region.mask else None),
             **analysis.to_dict(),
         }
         # Native form POSTs arrive with Accept: text/html (a fetch
@@ -332,7 +345,8 @@ class Handler(BaseHTTPRequestHandler):
         if "text/html" in self.headers.get("Accept", ""):
             page = render_result_html(
                 self.provider_name, filename,
-                photo_data_url(photo_bytes), analysis.to_dict())
+                photo_data_url(photo_bytes), analysis.to_dict(),
+                payload["mask_overlay_data_url"])
             data = page.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
