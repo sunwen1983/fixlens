@@ -28,9 +28,62 @@ I write it up? FixLens turns that one photo into an answer.
 Four deterministic mock faults are built in: water stain / leak, wall
 crack, mould spot, and peeling paint — pick one in the upload form
 or let the filename/notes pick it. In meta mode the region comes
-from SAM 3.1 instead, and the upload page now renders the photo
-itself with the region drawn on it as a red box — the segmentation
-is visible, not just a line of text.
+from SAM 3.1 instead, and the upload page renders the photo itself
+with the region drawn on it: a red box plus, when the optional
+parser is installed, a translucent red pixel mask inside the box —
+the segmentation is visible, not just a line of text.
+
+## How it works (pipeline)
+
+One photo flows through two Meta models, each doing the job the
+other cannot:
+
+1. **Concept** — the fault is mapped to a single short noun phrase
+   ("water stain", "wall crack", …). SAM takes exactly one concept
+   per request, so raw user text is never passed through as the
+   prompt.
+2. **Segment (SAM 3.1)** — SAM returns a pixel box plus a pixel
+   mask for the concept. The largest-area box wins (a photo can
+   hold several stains/cracks); on zero matches it retries once
+   with the broader concept "damage", then fails with a friendly
+   message instead of a bare error.
+3. **Mask overlay** — the mask payload is decoded with Meta's
+   official `meta-sam-parser` (optional, zero-dependency itself)
+   and rendered as a semi-transparent red PNG inside the box by a
+   pure-stdlib encoder. Without the parser, or on any decode
+   failure, the page degrades to box-only — a mask problem never
+   breaks a diagnosis.
+4. **Diagnose (Muse Spark 1.3)** — Spark receives the photo plus
+   the segmented region and returns structured output
+   (`text.format` JSON schema): fault type, severity *with a
+   reason*, likely cause, safety warnings first, ordered repair
+   steps, parts with quantities only (never prices), difficulty
+   and time as labelled estimates, and a responsibility hint.
+   Severity is validated against the allowed set; the ticket is
+   always `draft`.
+5. **Ticket** — the result page shows the photo with its overlay,
+   the safety-first diagnosis, and an editable ticket draft with a
+   copy button. Nothing is ever sent automatically.
+
+Why two models and not one: a single image model would diagnose
+the whole photo without grounding — the "simple image analyzer"
+failure mode. SAM answers *where* (a visible region the user can
+check), Spark answers *what, how urgent, and what next* (structured
+reasoning about that region). The grounding is what makes the
+diagnosis checkable.
+
+## Verified on (real numbers, no invented metrics)
+
+- 4 mock scenarios (water stain, wall crack, mould, peeling
+  paint): full flow end to end, deterministic outputs.
+- 1 real photo (ceiling water stain, Oct 27–28, 2026): real SAM
+  3.1 + real Muse Spark end to end, in-page rendering. The SAM
+  box hugged the stain, and the pixel mask highlighted the stain
+  itself inside the box (verified on a Mac, Oct 28). Total API
+  cost for the real-photo run: ~$0.01 (SAM per image + Spark
+  tokens).
+- No other real photos have been run yet — the demo video will
+  use real home/rental fault photos, not web images.
 
 ## Meta tools used — honestly labelled
 
@@ -44,10 +97,12 @@ is visible, not just a line of text.
   quantities only). The key comes only from the `MODEL_API_KEY`
   environment variable — never from code or git history — and the
   server refuses to start in meta mode without it.
-- **Live verification is still pending.** The wired provider is
-  tested with canned responses (31 tests), but no real fault photo
-  has been run through the live API yet; that Mac live test is the
-  remaining step before the demo video is recorded.
+- **Live verification is done.** The wired provider passed a real
+  end-to-end run Oct 27, 2026 (real SAM 3.1 + Muse Spark on a
+  ceiling water-stain photo, ~$0.01 charged, in-page rendering),
+  and the pixel-mask overlay was verified on a Mac Oct 28 (mask
+  hugs the stain inside the box). The suite is 41 tests,
+  including an official-encoder round-trip for mask decoding.
 - Mock mode is still available (`FIXLENS_PROVIDER` unset = mock):
   the provider interface (`segment` → region, `diagnose` → structured
   JSON) is shared, but mock outputs are fixed demo data. No key is
